@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kapitoolsignaal</title>
+<title>Kapitoolradar</title>
 <style>
 :root{
   --bg:#f5f6f8;--surface:#ffffff;--surface-2:#eef0f3;--surface-3:#f5f6f8;--border:#dde1e6;--line:#eceef1;
@@ -165,7 +165,7 @@ dialog::backdrop{background:rgba(10,12,16,.5)}
 }
 @media (max-width:760px){
   h1{font-size:24px}
-  .tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:6px 4px calc(10px + env(safe-area-inset-bottom));z-index:30;gap:0}
+  .tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));padding:6px 4px calc(10px + env(safe-area-inset-bottom));z-index:30;gap:0}
   .tab{flex-direction:column;gap:2px;font-size:12px;padding:6px 0;min-height:52px;justify-content:center}
   .tab[aria-selected="true"]{background:none;color:var(--accent)}
   .upd{display:none}
@@ -202,7 +202,7 @@ dialog::backdrop{background:rgba(10,12,16,.5)}
 <body>
 <header class="top">
   <div class="top-in">
-    <div class="brand" id="brand">Kapitoolsignaal</div>
+    <div class="brand" id="brand">Kapitoolradar</div>
     <nav class="tabs" id="tabs" role="tablist" aria-label="Tabbladen"></nav>
     <div class="top-r">
       <span class="small muted upd" id="updated"></span>
@@ -231,10 +231,12 @@ dialog::backdrop{background:rgba(10,12,16,.5)}
     <div id="tradesOut"></div>
   </section>
   <section class="panel" id="p-politici" role="tabpanel" hidden></section>
+  <section class="panel" id="p-signalen" role="tabpanel" hidden></section>
   <section class="panel" id="p-volglijst" role="tabpanel" hidden></section>
 </main>
 <dialog id="dlg" aria-labelledby="dlgTitle"></dialog>
 <dialog id="uitleg" aria-labelledby="uitlegTitle"></dialog>
+<dialog id="week" aria-labelledby="weekTitle"></dialog>
 
 <script>
 (function(){
@@ -277,13 +279,14 @@ const ICON = {
   trades:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
   politici:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c2.3 0 4 1.4 4.5 4"/></svg>',
   volglijst:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"/></svg>',
+  signalen:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12 18.5 5.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
   star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3z"/></svg>',
   filter:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>',
   sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
   auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17A8.5 8.5 0 0 0 12 3.5z" fill="currentColor"/></svg>'
 };
-const TABS = [['nieuw', 'Nieuw'], ['trades', 'Trades'], ['politici', 'Politici'], ['volglijst', 'Volglijst']];
+const TABS = [['nieuw', 'Nieuw'], ['trades', 'Trades'], ['politici', 'Politici'], ['signalen', 'Signalen'], ['volglijst', 'Volglijst']];
 
 /* ================= state ================= */
 const F0 = () => ({pol:'', type:'', kamer:'', partij:'', periode:'all', sector:'', soort:'', sig:'', gevolgd:''});
@@ -291,7 +294,7 @@ const S = {
   tab: store.get('ks.tab', 'nieuw'),
   q: '', f: F0(), fopen: false, tview: 'trades',
   sort: {trades:{k:'mel', d:-1}, rondes:{k:'saleTx', d:-1}, open:{k:'lastTx', d:-1}, prondes:{k:'saleTx', d:-1}, popen:{k:'lastTx', d:-1}, pols:{k:'win', d:-1}, ptrades:{k:'mel', d:-1}, watch:{k:'mel', d:-1}},
-  lim: {}, polDetail: null, ptab: 'overzicht', hz: '3m', trType: 'all', minN: true, pq: '',
+  lim: {}, bth: '3m', polDetail: null, ptab: 'overzicht', hz: '3m', trType: 'all', minN: true, pq: '',
   nperiod: 'last',
   watch: store.get('ks.watch', null) || store.get('ct.watch', {pol:[], tic:[]}),
   theme: store.get('ks.theme', 'auto')
@@ -401,7 +404,7 @@ function makeSample(){
     if (tr.soort === 'Aandeel' && mw && mw < 2e9) tr.signalen.push('klein bedrijf');
     delete tr._ri;
   });
-  return {laatst_bijgewerkt:new Date().toISOString(), politici, trades, koershistorie, insiders, insiderstat, cijfers, nieuws, bedrijven};
+  return {laatst_bijgewerkt:new Date().toISOString(), politici, trades, koershistorie, insiders, insiderstat, cijfers, nieuws, bedrijven, eurusd:{koers:1.10, datum:end}};
 }
 
 /* ================= data voorbereiden ================= */
@@ -459,7 +462,7 @@ function prepare(raw){
       type, ticker, bedrijf:t.bedrijf || ticker, sector:t.sector || 'Onbekend', soort:t.soort || 'Aandeel',
       range:shortRange(rangeTxt), rangeFull:rangeTxt, rangeV:m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : null, tx, mel,
       delay:tx && mel ? daysBetween(tx, mel) : null, pT, pM, pN, rT, rM, hz, hd,
-      sig: type === 'koop' && Array.isArray(t.signalen) ? t.signalen.slice() : [],
+      sig: type === 'koop' && Array.isArray(t.signalen) ? t.signalen.slice() : [], sigBase: type === 'koop' && Array.isArray(t.signalen) ? t.signalen.slice() : [],
       owner:t.eigenaar || '', saleKind:t.verkoop_soort || null, cm:t.commissie_match || null, insMatch:t.insider_match || null,
       cijfersNa:t.cijfers_na_koop || null, link:t.link || null
     };
@@ -468,7 +471,8 @@ function prepare(raw){
   if (!ref || isNaN(toD(ref))) ref = trades.reduce((m, t) => t.mel && t.mel > m ? t.mel : m, '') || TODAY;
   const obj = v => v && typeof v === 'object' ? v : {};
   return {updated:raw.laatst_bijgewerkt || null, ref, pols, polById, trades, hist, histDir:raw.koershistorie_map || null, histTried:new Set(),
-    insiders:obj(raw.insiders), insiderstat:obj(raw.insiderstat), cijfers:obj(raw.cijfers), nieuws:obj(raw.nieuws), bedrijven:obj(raw.bedrijven)};
+    insiders:obj(raw.insiders), insiderstat:obj(raw.insiderstat), cijfers:obj(raw.cijfers), nieuws:obj(raw.nieuws), bedrijven:obj(raw.bedrijven),
+    eurusd: raw.eurusd && num(raw.eurusd.koers) ? num(raw.eurusd.koers) : null};
 }
 
 /* ---------- rondes, status en extra signalen ---------- */
@@ -524,7 +528,13 @@ function buildRounds(){
     t.active = t.held && t.fresh;
     t.status = t.closed ? 'verkocht ' + fmtShort(t.closed.tx) : t.partSold ? 'deels verkocht ' + fmtShort(t.partSold) : 'nog in bezit';
     t.sig = t.sig.filter(x => x !== 'late melding');
-    if (minTx && t.tx && t.tx >= addDays(minTx, 365) && firstPT.get(t.pid + '|' + t.ticker) === t.tx && !t.sig.includes('nieuwe positie')) t.sig.push('nieuwe positie');
+    const np = minTx && t.tx && t.tx >= addDays(minTx, 365) && firstPT.get(t.pid + '|' + t.ticker) === t.tx;
+    if (np && !t.sig.includes('nieuwe positie')) t.sig.push('nieuwe positie');
+    const h = (t.sigBase || []).filter(x => x !== 'late melding');
+    if (np && !h.includes('nieuwe positie')) h.push('nieuwe positie');
+    if (t.pT && t.pM && t.pM < t.pT) h.push('onder koers bij melding');
+    t.sigHist = h;
+    t.strongHist = h.includes('commissie-match') && (h.includes('insider koopt ook') || h.includes('onder koers bij melding'));
     if (t.active && t.rT != null && t.rT < 0 && !t.sig.includes('onder koers politicus')) t.sig.push('onder koers politicus');
     const valid = [], exp = [];
     t.sig.forEach(x => {
@@ -588,7 +598,7 @@ function tradeList(rows, key, opts){
     <div class="c-pol">${opts.hidePol ? `<span class="small muted">eigenaar: ${esc(ownerKey(t.owner))}</span>` : `<div style="font-weight:600">${esc(t.polName)}</div><div class="small muted">${esc(polMeta(t.pol))}</div>`}</div>
     <div class="c-trade"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${t.strong ? '<span class="pill strong">sterk</span>' : ''}${typePill(t.type)}<b>${esc(t.ticker)}</b>${starBtn('tic', t.ticker, t.ticker)}${t.soort !== 'Aandeel' ? `<span class="pill">${esc(t.soort)}</span>` : ''}</div>
       <div class="small muted">${esc(t.bedrijf)}</div>${t.status ? `<div class="xs" style="color:${t.status === 'nog in bezit' ? 'var(--pos)' : 'var(--muted)'}">${esc(t.status)}</div>` : ''}</div>
-    <div class="c-amt">${esc(t.range)}</div>
+    <div class="c-amt">${esc(t.range)}${D.eurusd ? `<div class="xs muted">${eurRange(t.rangeFull)}</div>` : ''}</div>
     <div class="c-dates">${fmtShort(t.tx)}<div class="small muted">gemeld ${fmtShort(t.mel)}${t.delay != null ? ` (${t.delay} d)` : ''}</div></div>
     <div class="c-p"><span class="lbl-m">Politicus · vanaf werkelijk</span>${pctEl(t.rT)}</div>
     <div class="c-j"><span class="lbl-m">Jij · vanaf zichtbaar</span>${pctEl(t.rM)}</div>
@@ -686,6 +696,7 @@ function renderNieuw(){
           <div class="small muted" style="padding:12px 16px"><b style="color:var(--text)">Sterk</b> = commissie-match én (insider koopt ook of onder koers politicus). Een signaal blijft ${ACTIVE_DAYS} dagen na de melding actief. Verkoopt de politicus eerder, dan komt het bij “Vervallen signalen”.</div></div>
       </section>
       <aside class="col-side">
+        <div class="card pad"><div class="sec-h" style="margin:0"><h3>Weekoverzicht</h3><button class="btn" type="button" data-week style="min-height:38px">Bekijk en kopieer</button></div><p class="small muted" style="margin:6px 0 0">De opvallendste aankopen van de afgelopen 7 dagen, met een tekst die je kunt delen.</p></div>
         <div class="card pad"><h3>Vervallen signalen</h3><p class="small muted" style="margin:2px 0 6px">De politicus heeft het aandeel verkocht</p>
           ${vervallen.length ? vervallen.map(r => `<div class="mini-row" role="button" tabindex="0" data-trade="${r.sale.id}" style="cursor:pointer"><div><b>${esc(r.ticker)}</b><div class="small muted">${esc(r.polName)} · gekocht ${fmtShort(r.buyTx)}, verkocht ${fmtShort(r.saleTx)}</div></div>${pctEl(r.rZ)}</div>`).join('')
             + '<p class="xs muted" style="margin:6px 0 0">Percentage = jij, van melding koop tot melding verkoop</p>' : '<p class="small muted" style="margin:0">Nog geen vervallen signalen.</p>'}</div>
@@ -891,11 +902,146 @@ function renderVolglijst(){
       const ts = D.trades.filter(t => t.ticker === tk); const last = ts.slice().sort((a, b) => a.mel < b.mel ? 1 : -1)[0]; const H = D.hist[tk];
       const now = (ts.find(t => t.pN) || {}).pN || (H && H.length ? H[H.length - 1].c : null); const act = ts.filter(t => t.active && t.sig.length).length;
       return `<div class="card wcard" ${last ? `role="button" tabindex="0" data-trade="${last.id}"` : ''}><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:17px">${esc(tk)}</b>${starBtn('tic', tk, tk)}</div>
-        <span class="small muted">${esc(last ? last.bedrijf : '')}</span><span class="small">koers ${now ? fmtMoney(now) : '–'} · ${ts.length} trades</span>
+        <span class="small muted">${esc(last ? last.bedrijf : '')}</span><span class="small">koers ${now ? fmtMoney(now) + (eur(now) ? ' (' + fmtEur(eur(now)) + ')' : '') : '–'} · ${ts.length} trades</span>
         <span class="xs muted">${last ? 'laatste: ' + esc(last.polName) + ' ' + (last.type === 'koop' ? 'kocht' : 'verkocht') + ' · ' + fmtShort(last.mel) : ''}${act ? ` · <b style="color:var(--sig)">${act} actief signaal</b>` : ''}</span></div>`; }).join('') || '<div class="card pad small muted">Geen gevolgde aandelen.</div>'}</div>`;
     html += `<div class="sec-h"><h2>Trades van wat je volgt (${rows.length})</h2></div>${tradeList(rows, 'watch')}`;
   }
-  $('#p-volglijst').innerHTML = html + FOOT;
+  $('#p-volglijst').innerHTML = html + syncCard() + FOOT;
+}
+
+/* ================= tab: Signalen (backtest) ================= */
+const BT_SIGS = [['commissie-match', 'Commissie-match'], ['insider koopt ook', 'Insider koopt ook'], ['eerste insider', 'Eerste insider-aankoop in jaren'],
+  ['onder koers bij melding', 'Onder koers politicus (bij melding)'], ['koop vlak voor cijfers', 'Koop vlak voor cijfers'], ['cluster kopen', 'Cluster kopen'],
+  ['klein bedrijf', 'Klein bedrijf'], ['groot bedrag', 'Groot bedrag'], ['nieuwe positie', 'Nieuwe positie']];
+function btCalc(list){
+  const v = list.map(t => t.hz[S.bth]).filter(x => x != null);
+  return {n:v.length, avg:mean(v), med:median(v), up:v.length ? v.filter(x => x > 0).length / v.length * 100 : null};
+}
+function renderSignalen(){
+  const base = D.trades.filter(t => t.type === 'koop' && t.soort === 'Aandeel');
+  const all = btCalc(base);
+  const rows = [['Alle aankopen (vergelijking)', base, true], ['Sterk', base.filter(t => t.strongHist), false],
+    ...BT_SIGS.map(([k, l]) => [l, base.filter(t => (t.sigHist || []).some(x => x.startsWith(k))), false])];
+  const first = base.reduce((m, t) => t.mel && (!m || t.mel < m) ? t.mel : m, null);
+  const body = rows.map(([label, list, isBase]) => {
+    const c = btCalc(list); const few = c.n < 20;
+    const diff = !isBase && c.avg != null && all.avg != null ? c.avg - all.avg : null;
+    return `<tr style="${isBase ? 'background:var(--surface-3);font-weight:600' : few ? 'opacity:.6' : ''}"><td>${esc(label)}${few && !isBase ? ' <span class="xs muted">weinig data</span>' : ''}</td>
+      <td class="r">${c.n}</td><td class="r">${pctEl(c.avg)}</td><td class="r">${pctEl(c.med)}</td><td class="r">${c.up == null ? '–' : fmtNum(c.up, 0) + '%'}</td>
+      <td class="r">${isBase ? '' : diff == null ? '–' : `<span class="${cls(diff)}" style="font-weight:600">${diff > 0 ? '+' : diff < 0 ? '−' : ''}${fmtNum(Math.abs(diff), 1)} pp</span>`}</td></tr>`;
+  }).join('');
+  $('#p-signalen').innerHTML = `<h1 style="margin-bottom:6px">Werken de signalen?</h1>
+    <p class="muted" style="margin:0 0 16px;max-width:760px">Hoe deden aankopen met een bepaald signaal het in het verleden, gemeten vanaf het <b>zichtbare moment</b> (de melding)? Zo zie je of een signaal vaker iets oplevert dan een willekeurige aankoop van een Congreslid.</p>
+    <div class="chips" role="group" aria-label="Horizon" style="margin-bottom:12px">${[['1m', 'Na 1 maand'], ['3m', 'Na 3 maanden'], ['6m', 'Na 6 maanden'], ['12m', 'Na 12 maanden']].map(o => `<button class="chip" type="button" data-bth="${o[0]}" aria-pressed="${S.bth === o[0]}">${o[1]}</button>`).join('')}</div>
+    <div class="card tablewrap"><table style="min-width:680px"><thead><tr><th>Signaal</th><th class="r">Aantal</th><th class="r">Gemiddeld</th><th class="r">Mediaan</th><th class="r">Gestegen</th><th class="r">Verschil met alle aankopen</th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="card pad mt" style="margin-top:16px"><h3 style="margin-bottom:6px">Zo lees je dit</h3><ul class="small" style="margin:0;padding-left:18px">
+      <li><b>Gemiddeld / mediaan</b>: koersrendement van het aandeel van het zichtbare moment tot ${esc(HZ_LABEL[S.bth])} later. Alleen aandelen (geen ETF's) en alleen trades waarvan die periode al voorbij is.</li>
+      <li><b>Gestegen</b>: aandeel van de aankopen dat na die periode hoger stond. <b>Verschil</b>: gemiddelde van het signaal min het gemiddelde van alle aankopen, in procentpunten.</li>
+      <li>Signalen gelden hier zoals ze <i>op het moment van de melding</i> waren; “onder koers politicus” betekent: bij de melding stond het aandeel lager dan op het werkelijke moment.</li>
+      <li>Rijen met minder dan 20 trades zijn grijs: daar zegt het gemiddelde weinig. Ook bij grotere aantallen kan een verschil toeval zijn, en wat vroeger werkte, hoeft dat niet te blijven doen.</li>
+      <li>Insider-data gaat per bedrijf maar een beperkt aantal transacties terug, dus bij oudere trades kan “insider koopt ook” ontbreken. Commissie-match gebruikt de commissies van nu.</li>
+      <li>Periode: meldingen vanaf ${fmtDate(first)}. Rendement in dollars, zonder wisselkoerseffect.</li></ul></div>${FOOT}`;
+}
+
+/* ================= weekoverzicht ================= */
+function weekData(){
+  const to = D.ref, from = addDays(D.ref, -7);
+  const wk = D.trades.filter(t => t.mel && t.mel > from && t.mel <= to);
+  const buys = wk.filter(t => t.type === 'koop');
+  const top = buys.filter(t => t.active && t.sig.length).sort((a, b) => b.score - a.score || (a.mel < b.mel ? 1 : -1)).slice(0, 5);
+  const byTk = {};
+  buys.forEach(t => { (byTk[t.ticker] = byTk[t.ticker] || []).push(t); });
+  const clusters = Object.entries(byTk).map(([tk, ts]) => ({tk, ts, pols:[...new Set(ts.map(t => t.polName))]})).filter(c => c.pols.length >= 2);
+  const closed = D.rounds.filter(r => r.hadSig && !r.partial && r.saleMel && r.saleMel > from && r.saleMel <= to);
+  return {from, to, wk, buys, top, clusters, closed};
+}
+function weekText(w){
+  const L = [];
+  L.push(`Kapitoolradar weekoverzicht ${fmtShort(addDays(w.from, 1))} – ${fmtShort(w.to)}`);
+  L.push('');
+  L.push(`${w.wk.length} nieuwe meldingen van Amerikaanse Congresleden: ${w.buys.length} aankopen en ${w.wk.length - w.buys.length} verkopen.`);
+  if (w.top.length) {
+    L.push(''); L.push('Opvallendste aankopen:');
+    w.top.forEach(t => L.push(`- ${t.ticker} (${t.bedrijf}): ${t.polName} kocht ${t.range}, gemeld ${fmtShort(t.mel)}. ${t.sig.slice(0, 3).join(', ')}.`));
+  }
+  if (w.clusters.length) {
+    L.push(''); L.push('Meerdere politici kochten hetzelfde aandeel:');
+    w.clusters.forEach(c => L.push(`- ${c.tk}: ${c.pols.join(', ')}`));
+  }
+  if (w.closed.length) {
+    L.push(''); L.push('Verkocht (signaal vervallen):');
+    w.closed.forEach(r => L.push(`- ${r.ticker}: ${r.polName} verkocht na ${r.days} dagen (${fmtPct(r.rZ)} vanaf de melding van de aankoop)`));
+  }
+  L.push(''); L.push('Bedragen zijn bandbreedtes. Rendement is het koersrendement van het aandeel. Geen beleggingsadvies.');
+  return L.join('\n');
+}
+function openWeek(){
+  const w = weekData(), txt = weekText(w), dlg = $('#week');
+  dlg.innerHTML = `<div class="d-h"><div><h2 id="weekTitle" style="font-size:22px">Weekoverzicht</h2><div class="small muted">Meldingen van ${fmtShort(addDays(w.from, 1))} tot en met ${fmtShort(w.to)}</div></div><button class="iconbtn" type="button" data-close aria-label="Sluiten">×</button></div>
+    <div class="d-b">
+      <div class="grid4" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="card pad tile"><div class="lbl">Meldingen</div><div class="val">${w.wk.length}</div></div><div class="card pad tile"><div class="lbl">Aankopen</div><div class="val" style="color:var(--koop)">${w.buys.length}</div></div><div class="card pad tile"><div class="lbl">Verkopen</div><div class="val" style="color:var(--verk)">${w.wk.length - w.buys.length}</div></div></div>
+      <div><h3 style="margin-bottom:6px">Opvallendste aankopen</h3>${w.top.length ? `<div class="card" style="overflow:hidden">${w.top.map(t => `<div class="srow" role="button" tabindex="0" data-trade="${t.id}"><div class="s-main"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${t.strong ? '<span class="pill strong">sterk</span>' : ''}<b>${esc(t.ticker)}</b><span class="small muted">${esc(t.bedrijf)}</span></div><div class="small muted">${esc(t.polName)} kocht ${esc(t.range)} · gemeld ${fmtShort(t.mel)}</div><div style="margin-top:6px">${sigPills(t.sig, 3)}</div></div><div class="num-col s-p"><span class="xs muted">Politicus</span>${pctEl(t.rT)}</div><div class="num-col s-j"><span class="xs muted">Jij</span>${pctEl(t.rM)}</div></div>`).join('')}</div>` : '<p class="small muted" style="margin:0">Geen aankopen met signalen deze week.</p>'}</div>
+      ${w.clusters.length ? `<div><h3 style="margin-bottom:6px">Meerdere politici, zelfde aandeel</h3>${w.clusters.map(c => `<div class="mini-row"><b>${esc(c.tk)}</b><span class="small muted">${c.pols.map(esc).join(', ')}</span></div>`).join('')}</div>` : ''}
+      ${w.closed.length ? `<div><h3 style="margin-bottom:6px">Verkocht, signaal vervallen</h3>${w.closed.map(r => `<div class="mini-row"><div><b>${esc(r.ticker)}</b> <span class="small muted">${esc(r.polName)} · na ${r.days} dagen</span></div>${pctEl(r.rZ)}</div>`).join('')}</div>` : ''}
+      <div class="box"><div class="sec-h" style="margin:0 0 8px"><h3>Tekst om te delen</h3><button class="btn" type="button" data-copy="weektxt" style="min-height:38px">Kopieer tekst</button></div>
+        <textarea id="weektxt" readonly rows="10" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface-3);color:var(--text);font:13px/1.5 inherit;resize:vertical">${esc(txt)}</textarea></div>
+    </div>`;
+  if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+}
+
+/* ================= volglijst meenemen ================= */
+const encWatch = w => btoa(unescape(encodeURIComponent(JSON.stringify(w)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function decWatch(code){
+  try {
+    let c = String(code).trim().replace(/^.*#volg=/, '').replace(/-/g, '+').replace(/_/g, '/');
+    while (c.length % 4) c += '=';
+    const w = JSON.parse(decodeURIComponent(escape(atob(c))));
+    if (w && Array.isArray(w.pol) && Array.isArray(w.tic)) return {pol:w.pol.map(String).slice(0, 500), tic:w.tic.map(String).slice(0, 500)};
+  } catch (e) {}
+  return null;
+}
+function mergeWatch(w){
+  let n = 0;
+  w.pol.forEach(id => { if (!S.watch.pol.includes(id)) { S.watch.pol.push(id); n++; } });
+  w.tic.forEach(id => { if (!S.watch.tic.includes(id)) { S.watch.tic.push(id); n++; } });
+  store.set('ks.watch', S.watch);
+  return n;
+}
+function importFromHash(){
+  if (!location.hash.startsWith('#volg=')) return;
+  const w = decWatch(location.hash);
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!w) return;
+  const n = mergeWatch(w);
+  const b = $('#banner'); b.innerHTML = `<div>Volglijst overgenomen: ${n} ${n === 1 ? 'nieuw item' : 'nieuwe items'} toegevoegd.</div>`; b.hidden = false;
+}
+function syncCard(){
+  const code = encWatch(S.watch);
+  const link = location.origin + location.pathname + '#volg=' + code;
+  return `<div class="card pad" style="margin-top:20px"><h3 style="margin-bottom:4px">Volglijst meenemen naar een ander apparaat</h3>
+    <p class="small muted" style="margin:0 0 10px">Je volglijst staat alleen in deze browser. Open de link op je telefoon of plak de code daar, dan worden je sterren toegevoegd.</p>
+    <div class="chips" style="margin-bottom:10px"><button class="btn" type="button" data-copytext="${esc(link)}" style="min-height:40px">Kopieer link</button><button class="btn" type="button" data-copytext="${esc(code)}" style="min-height:40px">Kopieer code</button></div>
+    <div class="toolbar" style="margin:0"><label style="display:contents"><span style="position:absolute;left:-9999px">Plak een volglijst-code</span><input class="search" id="importCode" type="text" placeholder="Plak hier een code of link…" autocomplete="off"></label><button class="btn" type="button" data-import>Toevoegen</button></div>
+    <p class="xs muted" id="importMsg" style="margin:6px 0 0"></p></div>`;
+}
+async function copyText(txt, btn){
+  let ok = false;
+  try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) {
+    const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand('copy'); } catch (x) {} ta.remove();
+  }
+  if (btn) { const old = btn.textContent; btn.textContent = ok ? 'Gekopieerd' : 'Kopiëren lukte niet'; setTimeout(() => { btn.textContent = old; }, 1600); }
+}
+
+/* ================= euro ================= */
+const eur = v => D && D.eurusd && v ? v / D.eurusd : null;
+const fmtEur = v => v == null ? '' : '€' + fmtNum(v);
+function eurRange(full){
+  if (!D || !D.eurusd) return '';
+  const n = String(full).match(/\d[\d.,]*/g);
+  if (!n) return '';
+  const k = x => { const v = parseInt(x.replace(/[.,]/g, ''), 10) / D.eurusd; if (v >= 1e6) return '€' + fmtNum(v / 1e6, 1) + 'm'; if (v >= 1000) return '€' + Math.round(v / 1000) + 'k'; return '€' + Math.round(v); };
+  return '≈ ' + (n.length > 1 ? k(n[0]) + '–' + k(n[1]) : k(n[0]) + '+');
 }
 
 /* ================= grafiek en detailvenster ================= */
@@ -980,7 +1126,7 @@ function openTrade(id){
   const two = cijfersBox(t) + bedrijfBox(t);
   dlg.innerHTML = `<div class="d-h"><div style="min-width:0">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${t.strong ? '<span class="pill strong">sterk</span>' : ''}<h2 id="dlgTitle" style="font-size:24px">${esc(t.ticker)}</h2><span class="muted">${esc(t.bedrijf)}</span>${starBtn('tic', t.ticker, t.ticker)}</div>
-      <div class="small muted" style="margin-top:4px">${typePill(t.type)} ${esc(t.polName)} (${esc(polMeta(t.pol))}) · ${esc(t.rangeFull)}${t.status ? ` · <b style="color:${t.status === 'nog in bezit' ? 'var(--pos)' : 'var(--muted)'}">${esc(t.status)}</b>` : ''}</div></div>
+      <div class="small muted" style="margin-top:4px">${typePill(t.type)} ${esc(t.polName)} (${esc(polMeta(t.pol))}) · ${esc(t.rangeFull)}${D.eurusd ? ' (' + eurRange(t.rangeFull) + ')' : ''}${t.status ? ` · <b style="color:${t.status === 'nog in bezit' ? 'var(--pos)' : 'var(--muted)'}">${esc(t.status)}</b>` : ''}</div></div>
       <button class="iconbtn" type="button" data-close aria-label="Sluiten">×</button></div>
     <div class="d-b">
       ${sigs.length ? `<div class="pills">${sigs.map(s => `<span class="pill sig">${esc(s)}</span>`).join('')}</div>` : ''}
@@ -988,7 +1134,7 @@ function openTrade(id){
       <div class="kv4">
         <div><span class="xs">Werkelijk moment</span><b>${fmtDate(t.tx)}</b><span class="xs">slotkoers ${fmtMoney(t.pT)}</span></div>
         <div><span class="xs">Zichtbaar moment</span><b>${fmtDate(t.mel)}</b><span class="xs">slotkoers ${fmtMoney(t.pM)}${t.delay != null ? ' · ' + t.delay + ' d later' : ''}</span></div>
-        <div><span class="xs">Politicus</span>${pctEl(t.rT)}<span class="xs">koers nu ${fmtMoney(t.pN)}</span></div>
+        <div><span class="xs">Politicus</span>${pctEl(t.rT)}<span class="xs">koers nu ${fmtMoney(t.pN)}${eur(t.pN) ? ' (' + fmtEur(eur(t.pN)) + ')' : ''}</span></div>
         <div><span class="xs">Jij</span>${pctEl(t.rM)}<span class="xs">vanaf zichtbaar</span></div></div>
       <div class="chart" id="chartBox">${needsLoad(t) ? '<div class="empty">Koersgrafiek laden…</div>' : chartSvg(t)}</div>
       ${two ? `<div class="two">${two}</div>` : ''}
@@ -1011,7 +1157,7 @@ async function loadHist(tk){
     D.hist[tk] = normH(await res.json());
   } catch (e) { /* geen koersbestand */ }
 }
-['dlg', 'uitleg'].forEach(id => $('#' + id).addEventListener('click', e => {
+['dlg', 'uitleg', 'week'].forEach(id => $('#' + id).addEventListener('click', e => {
   if (e.target.closest('[data-close]') || e.target === e.currentTarget) e.currentTarget.close ? e.currentTarget.close() : e.currentTarget.removeAttribute('open');
 }));
 
@@ -1037,6 +1183,10 @@ function openUitleg(){
     <p>Per politicus, aandeel en eigenaar (zelf, partner, gezamenlijk) koppelen we elke verkoop aan de eerdere aankopen die nog openstonden. Een volledige verkoop of een verkoop met onbekende omvang sluit ze af; een deelverkoop niet. Bij meerdere aankopen gebruiken we de gemiddelde slotkoers.</p>
     <h3>Track record</h3>
     <p>Gemeten vanaf het zichtbare moment. Bij kopen telt een koersstijging als “goede kant op”, bij verkopen een daling. Aandelen stijgen op lange termijn vaker dan ze dalen, dus bij kopen ligt dit al snel boven 50%. Kleine aantallen zeggen weinig.</p>
+    <h3>Werken de signalen?</h3>
+    <p>Op het tabblad Signalen zie je per signaal hoe aankopen het in het verleden deden vanaf het zichtbare moment, vergeleken met alle aankopen. Kleine aantallen zeggen weinig, en wat vroeger werkte, hoeft dat niet te blijven doen.</p>
+    <h3>Dollars en euro's</h3>
+    <p>Koersen en rendementen zijn in dollars. Bedragen en koersen in euro zijn omgerekend met de wisselkoers van vandaag, dus een benadering. Als je in euro belegt, kan je rendement anders uitvallen door de wisselkoers.</p>
     <h3>Goed om te weten</h3>
     <ul><li>Bedragen zijn bandbreedtes zoals gemeld, geen exacte bedragen.</li><li>Rendement is het koersrendement van het aandeel, niet het exacte resultaat van de politicus. De koers op een moment is de slotkoers van die dag.</li>
       <li>Alleen huidige Congresleden; opties en obligaties tellen niet mee. ETF's staan erin met een label.</li><li>Je volglijst en je vorige bezoek worden alleen in deze browser bewaard.</li>
@@ -1051,10 +1201,10 @@ function renderTabs(){
   $('#tabs').innerHTML = TABS.map(([id, l]) => `<button class="tab" type="button" role="tab" aria-controls="p-${id}" aria-selected="${S.tab === id}" data-tab="${id}">${ICON[id]}<span>${l}</span></button>`).join('');
   TABS.forEach(([id]) => { $('#p-' + id).hidden = S.tab !== id; });
 }
-const R = {nieuw:renderNieuw, trades:renderTrades, politici:renderPolitici, volglijst:renderVolglijst};
+const R = {nieuw:renderNieuw, trades:renderTrades, politici:renderPolitici, signalen:renderSignalen, volglijst:renderVolglijst};
 function render(){ if (D) R[S.tab](); }
 function setTab(id){ S.tab = id; store.set('ks.tab', id); if (id !== 'trades') { S.fopen = false; $('#backdrop').classList.remove('on'); } renderTabs(); render(); window.scrollTo(0, 0); }
-function closeDialogs(){ ['dlg', 'uitleg'].forEach(id => { const d = $('#' + id); if (d.open) d.close ? d.close() : d.removeAttribute('open'); }); }
+function closeDialogs(){ ['dlg', 'uitleg', 'week'].forEach(id => { const d = $('#' + id); if (d.open) d.close ? d.close() : d.removeAttribute('open'); }); }
 
 document.addEventListener('click', e => {
   const t = e.target;
@@ -1088,7 +1238,12 @@ document.addEventListener('click', e => {
   if (t.closest('[data-back]')) { S.polDetail = null; render(); window.scrollTo(0, 0); return; }
   const pt = t.closest('[data-ptab]'); if (pt) { S.ptab = pt.dataset.ptab; render(); return; }
   const trb = t.closest('[data-trt]'); if (trb) { S.trType = trb.dataset.trt; render(); return; }
-  if (t.closest('dialog')) return;
+  const bth = t.closest('[data-bth]'); if (bth) { S.bth = bth.dataset.bth; render(); return; }
+  if (t.closest('[data-week]')) { openWeek(); return; }
+  const cp = t.closest('[data-copy]'); if (cp) { const el = $('#' + cp.dataset.copy); if (el) copyText(el.value, cp); return; }
+  const cpt = t.closest('[data-copytext]'); if (cpt) { copyText(cpt.dataset.copytext, cpt); return; }
+  if (t.closest('[data-import]')) { const w = decWatch(($('#importCode') || {}).value || ''); const msg = $('#importMsg'); if (!w) { if (msg) msg.textContent = 'Deze code wordt niet herkend.'; return; } const n = mergeWatch(w); render(); const m2 = $('#importMsg'); if (m2) m2.textContent = n + ' nieuwe items toegevoegd.'; return; }
+  if (t.closest('dialog') && !t.closest('#week')) return;
   const rr = t.closest('[data-round]'); if (rr) { const r = D.roundById.get(+rr.dataset.round); if (r) openTrade(r.sale.id); return; }
   const op = t.closest('[data-openpos]'); if (op) { const o = D.open[+op.dataset.openpos]; if (o) openTrade(o.buys[o.buys.length - 1].id); return; }
   const tr = t.closest('[data-trade]'); if (tr) { openTrade(+tr.dataset.trade); return; }
@@ -1135,6 +1290,7 @@ async function load(){
   buildRounds();
   $('#updated').textContent = 'Bijgewerkt ' + (D.updated ? fmtUpdated(D.updated) : 'onbekend');
   if (sample) { const b = $('#banner'); b.innerHTML = `<div><b>Voorbeelddata.</b> data.json is niet gevonden of niet leesbaar, dus je ziet fictieve politici, bedrijven en koersen.${esc(reason)}</div>`; b.hidden = false; }
+  if (location.hash.startsWith('#volg=')) { const keep = $('#banner').hidden ? '' : $('#banner').innerHTML; importFromHash(); if (keep) $('#banner').innerHTML = keep + $('#banner').innerHTML; }
   renderFilters(); renderTabs(); render();
 }
 renderTabs();

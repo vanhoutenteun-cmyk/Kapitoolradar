@@ -217,7 +217,37 @@ def fetch_disclosures(path, kamer):
     return rows
 
 
+SYM = {}  # ticker uit de melding -> schrijfwijze die FMP kent (bv. BRK.B -> BRK-B)
+
+
+def sym_variants(tk):
+    out = [SYM[tk]] if tk in SYM else []
+    for v in (tk, tk.replace(".", "-"), tk.replace("-", "."), tk.replace(".", "")):
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def q(tk):
+    return SYM.get(tk, tk)
+
+
 def prices_fmp(tk, frm):
+    pts = []
+    for v in sym_variants(tk):
+        try:
+            pts = prices_fmp_one(v, frm)
+        except Exception:
+            if v == sym_variants(tk)[-1]:
+                raise
+            continue
+        if pts:
+            SYM[tk] = v
+            return pts
+    return pts
+
+
+def prices_fmp_one(tk, frm):
     d = fmp("historical-price-eod/light", symbol=tk, **{"from": frm, "to": TODAY.isoformat()})
     if isinstance(d, dict):
         d = d.get("historical", [])
@@ -244,7 +274,7 @@ def load_prev_profiles():
 
 
 ONLY_CURRENT = os.environ.get("ALLEEN_HUIDIGE_LEDEN", "1") != "0"  # zet op 0 om oud-leden te tonen
-INSIDER_DAYS = int(os.environ.get("INSIDER_DAYS", "365"))
+INSIDER_DAYS = int(os.environ.get("INSIDER_DAYS", str(LOOKBACK)))  # ook oudere trades, voor de signaal-backtest
 INSIDER_SINCE = (TODAY - timedelta(days=INSIDER_DAYS)).isoformat()
 NEWS_DAYS = int(os.environ.get("NEWS_DAYS", "90"))
 SMALL_CAP = float(os.environ.get("KLEIN_BEDRIJF_GRENS", "2e9"))  # marktwaarde in dollars
@@ -279,7 +309,7 @@ def fetch_insiders(trades):
     out, fails, logged = {}, 0, False
     for i, tk in enumerate(recent):
         try:
-            d = fmp("insider-trading/search", symbol=tk, page=0, limit=100)
+            d = fmp("insider-trading/search", symbol=q(tk), page=0, limit=100)
         except Exception as e:
             fails += 1
             if fails == 1:
@@ -337,7 +367,7 @@ def fetch_module(name, tickers, variants, parse):
     out, fails, logged = {}, 0, False
     for i, tk in enumerate(tickers):
         try:
-            d = fmp_first(name, variants, tk)
+            d = fmp_first(name, variants, q(tk))
         except Exception as e:
             fails += 1
             if fails == 1:
@@ -430,6 +460,16 @@ def build():
         sys.exit("FMP_API_KEY ontbreekt. Zet hem als repository secret.")
     log(f"Trades vanaf {SINCE} ({LOOKBACK} dagen)")
     people = load_legislators()
+    eurusd = None
+    for path in ("quote-short", "quote"):
+        try:
+            r = fmp(path, symbol="EURUSD")
+            if isinstance(r, list) and r and pick(r[0], "price"):
+                eurusd = float(pick(r[0], "price"))
+                log(f"Wisselkoers EUR/USD: {eurusd}")
+                break
+        except Exception as e:
+            log(f"Wisselkoers via {path} mislukt:", str(e)[:120])
 
     raw = fetch_disclosures("senate-latest", "Senate") + fetch_disclosures("house-latest", "House")
     politici, trades, skipped, former = {}, {}, 0, 0
@@ -498,8 +538,14 @@ def build():
                 and (c0.get("bijgewerkt") or "") >= (TODAY - timedelta(days=7)).isoformat():
             continue
         try:
-            d = fmp("profile", symbol=tk)
-            d = d[0] if isinstance(d, list) and d else {}
+            d = {}
+            for v in sym_variants(tk):
+                r = fmp("profile", symbol=v)
+                if isinstance(r, list) and r:
+                    d = r[0]
+                    if v != tk:
+                        SYM[tk] = v
+                    break
             mc = pick(d, "marketCap", "mktCap")
             cache[tk] = {"sector": SECTOR_NL.get(d.get("sector"), d.get("sector") or ""), "naam": d.get("companyName"),
                          "industrie": d.get("industry") or "", "marktwaarde": float(mc) if mc else None,
@@ -622,6 +668,8 @@ def build():
         "cijfers": cijfers,
         "insiderstat": insiderstat,
         "nieuws": nieuws,
+        "eurusd": {"koers": eurusd, "datum": TODAY.isoformat()} if eurusd else None,
+        "tickers_fmp": {k: v for k, v in SYM.items() if k != v},
         "bedrijven": {tk: {"marktwaarde": c.get("marktwaarde"), "industrie": c.get("industrie")}
                       for tk, c in cache.items() if tk in hist or tk in cijfers},
     }
