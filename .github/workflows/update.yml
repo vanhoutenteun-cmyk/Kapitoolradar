@@ -1,5 +1,11 @@
 name: Data bijwerken
 
+# Hosting
+# - Cloudflare Pages: deployt zodra de secrets CLOUDFLARE_API_TOKEN en CLOUDFLARE_ACCOUNT_ID bestaan.
+# - GitHub Pages: deployt zolang de repo-variabele HOSTING niet op "cloudflare" staat.
+#   Zet HOSTING=cloudflare (Settings > Secrets and variables > Actions > Variables) zodra
+#   kapitoolradar.nl naar Cloudflare wijst, en zet daarna GitHub Pages uit. Zie CLOUDFLARE.md.
+
 on:
   schedule:
     - cron: "17 7 * * *"   # elke dag om 07:17 UTC (08:17 Nederlandse wintertijd)
@@ -12,10 +18,14 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  deployments: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
+
+env:
+  CF_PROJECT: kapitoolradar
 
 jobs:
   build:
@@ -28,19 +38,55 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Caches van de vorige run (profielen, wetten). Werkt ook als de site achter een inlog staat.
+      - name: Cache van vorige run ophalen
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: caches-${{ github.run_id }}
+          restore-keys: caches-
+
       - name: Site bouwen
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
-          PREV_URL: https://kapitoolradar.nl
+          CACHE_DIR: cache
+          PREV_URL: https://kapitoolradar.nl   # terugval zolang de cache nog leeg is
         run: python build_data.py
 
+      - name: Cache klaarzetten
+        run: |
+          mkdir -p cache
+          cp site/profielen.json site/wetten.json cache/
+
+      - name: Cache bewaren
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: caches-${{ github.run_id }}
+
+      - name: Deploy naar Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::Geen Cloudflare-secrets ingesteld, Cloudflare-deploy overgeslagen."
+            exit 0
+          fi
+          if ! npx --yes wrangler@4 pages project list | grep -qw "$CF_PROJECT"; then
+            npx --yes wrangler@4 pages project create "$CF_PROJECT" --production-branch=main
+          fi
+          npx --yes wrangler@4 pages deploy site --project-name="$CF_PROJECT" --branch=main --commit-dirty=true
+
       - uses: actions/upload-pages-artifact@v3
+        if: vars.HOSTING != 'cloudflare'
         with:
           path: site
 
   deploy:
     needs: build
+    if: vars.HOSTING != 'cloudflare'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -21,7 +21,8 @@ Instellingen via omgevingsvariabelen:
   MAX_PAGES      max. pagina's per kamer, standaard 400
   PAGE_LIMIT     meldingen per pagina, standaard 100 (wordt automatisch verlaagd als FMP dat eist)
   MAX_TICKERS    max. aantal aandelen met koersen, standaard 3000
-  PREV_URL       adres van de gepubliceerde site (voor de profielcache), optioneel
+  CACHE_DIR      map met profielen.json/wetten.json van de vorige run (eerste keus), optioneel
+  PREV_URL       adres van de gepubliceerde site (terugval voor de caches), optioneel
 """
 import json, os, re, shutil, sys, time, unicodedata, urllib.request, urllib.error, urllib.parse
 from datetime import date, datetime, timedelta, timezone
@@ -35,6 +36,7 @@ PAGE_LIMIT = int(os.environ.get("PAGE_LIMIT", "100"))
 MAX_TICKERS = int(os.environ.get("MAX_TICKERS", "3000"))
 OUT_DIR = os.environ.get("OUT_DIR", "site")
 PREV_URL = os.environ.get("PREV_URL", "").rstrip("/")
+CACHE_DIR = os.environ.get("CACHE_DIR", "").strip()
 DELAY = float(os.environ.get("FMP_DELAY", "0.22"))  # ~270 aanroepen/minuut, onder de 300 van Starter
 TODAY = date.today()
 SINCE = (TODAY - timedelta(days=LOOKBACK)).isoformat()
@@ -356,7 +358,28 @@ def prices_fmp_one(tk, frm):
     return [[k, pts[k]] for k in sorted(pts)]
 
 
+def load_local_cache(name):
+    """Cache uit CACHE_DIR (door de workflow bewaard). Geeft None als die er niet is."""
+    if not CACHE_DIR:
+        return None
+    path = os.path.join(CACHE_DIR, name)
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            log(f"Cache {name} uit {CACHE_DIR}: {len(d)} items")
+            return d
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"Cache {name} in {CACHE_DIR} onleesbaar:", str(e)[:120])
+    return None
+
+
 def load_prev_profiles():
+    local = load_local_cache("profielen.json")
+    if local is not None:
+        return local
     if not PREV_URL:
         return {}
     try:
@@ -513,6 +536,9 @@ def bill_label(key):
 
 
 def load_prev_json(name):
+    local = load_local_cache(name)
+    if local is not None:
+        return local
     if not PREV_URL:
         return {}
     try:
