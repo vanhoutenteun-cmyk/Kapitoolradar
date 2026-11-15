@@ -31,6 +31,7 @@ jobs:
       - name: Site bouwen
         env:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
           PREV_URL: https://kapitoolradar.nl
         run: python build_data.py
 

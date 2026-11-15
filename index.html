@@ -378,6 +378,7 @@ function makeSample(){
   const insiders = {ARVN:[{naam:'J. Ramirez', rol:'officer: CFO', type:'koop', datum:days[days.length - 9], aantal:4000, prijs:41.2}, {naam:'M. Osei', rol:'director', type:'koop', datum:days[days.length - 11], aantal:1500, prijs:40.1}],
     LMNA:[{naam:'K. Tran', rol:'officer: CEO', type:'koop', datum:days[days.length - 15], aantal:10000, prijs:80.5}]};
   const insiderstat = {}, cijfers = {}, nieuws = {}, bedrijven = {};
+  const opdrachten = {ARVN:[{datum:days[days.length - 6], bedrag:45e6, instantie:'Department of the Air Force', omschrijving:'Voorbeeldopdracht: onderhoudssystemen', url:'', groot:true}, {datum:days[days.length - 120], bedrag:8e6, instantie:'Department of the Army', omschrijving:'Voorbeeldopdracht', url:'', groot:false}]};
   T.forEach(t => {
     bedrijven[t[0]] = {marktwaarde:t[6], industrie: t[0] === 'ARVN' ? 'Aerospace & Defense' : ''};
     const q = []; const nowD = toD(end);
@@ -400,11 +401,14 @@ function makeSample(){
     if (cm) { tr.signalen.push('commissie-match'); tr.commissie_match = cm; }
     const nx = (cijfers[tr.ticker] || []).find(c => c.datum > tr.transactiedatum && c.datum <= addDays(tr.transactiedatum, 30));
     if (nx) { tr.signalen.push('koop vlak voor cijfers'); tr.cijfers_na_koop = nx.datum; }
+    if (tr.ticker === 'ARVN' && pol && pol.commissies.includes('Armed Services')) { tr.signalen.push('wetgeving in commissie'); tr.wet_in_commissie = {datum:addDays(tr.transactiedatum, 6), actie:'Markup by', commissie:'Armed Services', nummer:'H.R. 0000', titel:'Voorbeeldwet onderhoud defensiesystemen', beleid:'Armed Forces and National Security', url:''}; }
+    const od = (opdrachten[tr.ticker] || []).find(o => o.groot && o.datum > tr.transactiedatum && o.datum <= addDays(tr.transactiedatum, 90));
+    if (od) { tr.signalen.push('overheidsopdracht na koop'); tr.opdracht_na_koop = {datum:od.datum, bedrag:od.bedrag, instantie:od.instantie}; }
     const mw = (bedrijven[tr.ticker] || {}).marktwaarde;
     if (tr.soort === 'Aandeel' && mw && mw < 2e9) tr.signalen.push('klein bedrijf');
     delete tr._ri;
   });
-  return {laatst_bijgewerkt:new Date().toISOString(), politici, trades, koershistorie, insiders, insiderstat, cijfers, nieuws, bedrijven, eurusd:{koers:1.10, datum:end}};
+  return {laatst_bijgewerkt:new Date().toISOString(), politici, trades, koershistorie, insiders, insiderstat, cijfers, nieuws, bedrijven, opdrachten, eurusd:{koers:1.10, datum:end}};
 }
 
 /* ================= data voorbereiden ================= */
@@ -419,7 +423,7 @@ const normH = a => (Array.isArray(a) ? a : []).map(x => Array.isArray(x) ? ({d:S
 const HZ_DAYS = {'1m':30, '3m':91, '6m':182, '12m':365};
 const ACTIVE_DAYS = 45; // zo lang na de melding telt een aankoop als actief koopsignaal
 const HZ_LABEL = {m:'tot nu', '1m':'1 mnd', '3m':'3 mnd', '6m':'6 mnd', '12m':'12 mnd'};
-const SIG_ORDER = ['commissie-match', 'insider koopt ook', 'eerste insider', 'onder koers politicus', 'koop vlak voor cijfers', 'cluster kopen', 'klein bedrijf', 'groot bedrag', 'nieuwe positie', 'cluster gemengd'];
+const SIG_ORDER = ['commissie-match', 'insider koopt ook', 'eerste insider', 'overheidsopdracht', 'wetgeving', 'onder koers politicus', 'koop vlak voor cijfers', 'cluster kopen', 'klein bedrijf', 'groot bedrag', 'nieuwe positie', 'cluster gemengd'];
 const sigRank = s => { const i = SIG_ORDER.findIndex(x => s.startsWith(x)); return i < 0 ? 99 : i; };
 function shortRange(s){
   const n = String(s).match(/\d[\d.,]*/g);
@@ -464,14 +468,14 @@ function prepare(raw){
       delay:tx && mel ? daysBetween(tx, mel) : null, pT, pM, pN, rT, rM, hz, hd,
       sig: type === 'koop' && Array.isArray(t.signalen) ? t.signalen.slice() : [], sigBase: type === 'koop' && Array.isArray(t.signalen) ? t.signalen.slice() : [],
       owner:t.eigenaar || '', saleKind:t.verkoop_soort || null, cm:t.commissie_match || null, insMatch:t.insider_match || null,
-      cijfersNa:t.cijfers_na_koop || null, link:t.link || null
+      cijfersNa:t.cijfers_na_koop || null, opdracht:t.opdracht_na_koop || null, wet:t.wet_in_commissie || null, link:t.link || null
     };
   });
   let ref = raw.laatst_bijgewerkt ? String(raw.laatst_bijgewerkt).slice(0, 10) : null;
   if (!ref || isNaN(toD(ref))) ref = trades.reduce((m, t) => t.mel && t.mel > m ? t.mel : m, '') || TODAY;
   const obj = v => v && typeof v === 'object' ? v : {};
   return {updated:raw.laatst_bijgewerkt || null, ref, pols, polById, trades, hist, histDir:raw.koershistorie_map || null, histTried:new Set(),
-    insiders:obj(raw.insiders), insiderstat:obj(raw.insiderstat), cijfers:obj(raw.cijfers), nieuws:obj(raw.nieuws), bedrijven:obj(raw.bedrijven),
+    insiders:obj(raw.insiders), insiderstat:obj(raw.insiderstat), cijfers:obj(raw.cijfers), nieuws:obj(raw.nieuws), bedrijven:obj(raw.bedrijven), opdrachten:obj(raw.opdrachten),
     eurusd: raw.eurusd && num(raw.eurusd.koers) ? num(raw.eurusd.koers) : null};
 }
 
@@ -530,11 +534,11 @@ function buildRounds(){
     t.sig = t.sig.filter(x => x !== 'late melding');
     const np = minTx && t.tx && t.tx >= addDays(minTx, 365) && firstPT.get(t.pid + '|' + t.ticker) === t.tx;
     if (np && !t.sig.includes('nieuwe positie')) t.sig.push('nieuwe positie');
-    const h = (t.sigBase || []).filter(x => x !== 'late melding');
+    const h = (t.sigBase || []).filter(x => x !== 'late melding' && (x !== 'overheidsopdracht na koop' || (t.opdracht && t.mel && t.opdracht.datum <= t.mel)) && (x !== 'wetgeving in commissie' || (t.wet && t.mel && t.wet.datum <= t.mel)));
     if (np && !h.includes('nieuwe positie')) h.push('nieuwe positie');
     if (t.pT && t.pM && t.pM < t.pT) h.push('onder koers bij melding');
     t.sigHist = h;
-    t.strongHist = h.includes('commissie-match') && (h.includes('insider koopt ook') || h.includes('onder koers bij melding'));
+    t.strongHist = h.includes('commissie-match') && (h.includes('insider koopt ook') || h.includes('onder koers bij melding') || h.includes('overheidsopdracht na koop'));
     if (t.active && t.rT != null && t.rT < 0 && !t.sig.includes('onder koers politicus')) t.sig.push('onder koers politicus');
     const valid = [], exp = [];
     t.sig.forEach(x => {
@@ -545,7 +549,7 @@ function buildRounds(){
     t.sig = valid.sort((a, b) => sigRank(a) - sigRank(b));
     t.sigExpired = exp.sort((a, b) => sigRank(a) - sigRank(b));
     if (exp.length) t.expiredWhy = !t.held ? 'het aandeel is verkocht' : !t.fresh ? 'de melding is ouder dan ' + ACTIVE_DAYS + ' dagen' : 'de kwartaalcijfers zijn al geweest';
-    t.strong = t.sig.includes('commissie-match') && (t.sig.includes('insider koopt ook') || t.sig.includes('onder koers politicus'));
+    t.strong = t.sig.includes('commissie-match') && (t.sig.includes('insider koopt ook') || t.sig.includes('onder koers politicus') || t.sig.includes('overheidsopdracht na koop'));
     t.score = (t.strong ? 100 : 0) + t.sig.length;
   });
   D.roundById = new Map(rounds.map(r => [r.id, r]));
@@ -693,7 +697,7 @@ function renderNieuw(){
       <section class="col-main">
         <div class="sec-h"><h2>Actieve koopsignalen <span class="small muted" style="font-weight:400">· gemeld in de laatste ${ACTIVE_DAYS} dagen, nog in bezit, sterkste eerst (${active.length})</span></h2><button class="linkbtn" type="button" data-goto-signals>Alle in Trades</button></div>
         <div class="card" style="overflow:hidden">${sHtml}
-          <div class="small muted" style="padding:12px 16px"><b style="color:var(--text)">Sterk</b> = commissie-match én (insider koopt ook of onder koers politicus). Een signaal blijft ${ACTIVE_DAYS} dagen na de melding actief. Verkoopt de politicus eerder, dan komt het bij “Vervallen signalen”.</div></div>
+          <div class="small muted" style="padding:12px 16px"><b style="color:var(--text)">Sterk</b> = commissie-match én (insider koopt ook, onder koers politicus of overheidsopdracht na koop). Een signaal blijft ${ACTIVE_DAYS} dagen na de melding actief. Verkoopt de politicus eerder, dan komt het bij “Vervallen signalen”.</div></div>
       </section>
       <aside class="col-side">
         <div class="card pad"><div class="sec-h" style="margin:0"><h3>Weekoverzicht</h3><button class="btn" type="button" data-week style="min-height:38px">Bekijk en kopieer</button></div><p class="small muted" style="margin:6px 0 0">De opvallendste aankopen van de afgelopen 7 dagen, met een tekst die je kunt delen.</p></div>
@@ -911,7 +915,7 @@ function renderVolglijst(){
 
 /* ================= tab: Signalen (backtest) ================= */
 const BT_SIGS = [['commissie-match', 'Commissie-match'], ['insider koopt ook', 'Insider koopt ook'], ['eerste insider', 'Eerste insider-aankoop in jaren'],
-  ['onder koers bij melding', 'Onder koers politicus (bij melding)'], ['koop vlak voor cijfers', 'Koop vlak voor cijfers'], ['cluster kopen', 'Cluster kopen'],
+  ['overheidsopdracht', 'Overheidsopdracht na koop (vóór de melding)'], ['wetgeving', 'Wetgeving in commissie (vóór de melding)'], ['onder koers bij melding', 'Onder koers politicus (bij melding)'], ['koop vlak voor cijfers', 'Koop vlak voor cijfers'], ['cluster kopen', 'Cluster kopen'],
   ['klein bedrijf', 'Klein bedrijf'], ['groot bedrag', 'Groot bedrag'], ['nieuwe positie', 'Nieuwe positie']];
 function btCalc(list){
   const v = list.map(t => t.hz[S.bth]).filter(x => x != null);
@@ -1109,6 +1113,27 @@ function bedrijfBox(t){
     <div class="kvrow"><span>Sector</span><b>${esc(t.sector)}${b.industrie ? ' · ' + esc(b.industrie) : ''}</b></div>
     ${b.marktwaarde && b.marktwaarde < 2e9 ? '<p class="small muted" style="margin:4px 0 0">Bij kleine bedrijven valt een aankoop van een politicus meer op dan bij een reus als Apple.</p>' : ''}</section>`;
 }
+function opdrachtenBox(t){
+  const os = (D.opdrachten[t.ticker] || []).slice(0, 5);
+  if (!os.length) return '';
+  const mw = (D.bedrijven[t.ticker] || {}).marktwaarde;
+  return `<section class="box"><div class="sec-h" style="margin:0 0 4px"><h3>Overheidsopdrachten</h3>${t.opdracht ? `<span class="pill sig">${fmtCap(t.opdracht.bedrag)} op ${fmtShort(t.opdracht.datum)}, ${daysBetween(t.tx, t.opdracht.datum)} d na de koop</span>` : ''}</div>
+    ${os.map(o => `<div class="kvrow" style="display:block"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><span><b>${fmtCap(o.bedrag)}</b>${mw ? ` <span class="xs muted">(${fmtNum(o.bedrag / mw * 100, 1)}% van de marktwaarde)</span>` : ''}${o.groot ? ' <span class="pill sig">groot</span>' : ''}</span><span class="small muted">${fmtShort(o.datum)}</span></div>
+      <div class="small muted">${esc(o.instantie || '')}${o.omschrijving ? ' · ' + esc(o.omschrijving) : ''}</div>${o.url && /^https?:/.test(o.url) ? `<a class="small" href="${esc(o.url)}" target="_blank" rel="noopener noreferrer">Bekijk op USAspending.gov</a>` : ''}</div>`).join('')}
+    <p class="xs muted" style="margin:6px 0 0">Gekoppeld op bedrijfsnaam via USAspending.gov; controleer de ontvanger via de link. Datum = datum van de eerste verplichting (gunning) van de opdracht. “Groot” = minstens $10 miljoen én minstens 1% van de huidige marktwaarde.</p></section>`;
+}
+const ACTIE_NL = {'markup by':'behandeld (markup) door', 'reported by':'gerapporteerd door', 'hearings by':'hoorzitting door', 'discharged from':'onttrokken aan', 'reported original measure':'eigen voorstel ingediend door'};
+function wetBox(t){
+  const w = t.wet; if (!w) return '';
+  const actie = ACTIE_NL[String(w.actie || '').toLowerCase()] || w.actie;
+  const dd = t.tx ? daysBetween(t.tx, w.datum) : null;
+  return `<section class="box"><h3 style="margin-bottom:6px">Wetgeving in de commissie</h3>
+    <div class="kvrow" style="display:block"><b>${esc(w.nummer || '')}</b>${w.titel ? ' · ' + esc(w.titel) : ''}
+      <div class="small muted">${esc(actie)} ${esc(w.commissie || '')} op ${fmtShort(w.datum)}${dd != null ? ` (${dd === 0 ? 'op de dag van de koop' : Math.abs(dd) + ' dagen ' + (dd > 0 ? 'na' : 'vóór') + ' de koop'})` : ''}</div>
+      <div class="small muted">Beleidsterrein: ${esc(w.beleid || '–')}</div>
+      ${w.url && /^https?:/.test(w.url) ? `<a class="small" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">Bekijk op Congress.gov</a>` : ''}</div>
+    <p class="xs muted" style="margin:6px 0 0">Grof signaal: gekoppeld via het beleidsterrein van het wetsvoorstel en de sector van het bedrijf, niet via het bedrijf zelf. Gebruikt de huidige commissies.</p></section>`;
+}
 function nieuwsBox(t){
   const ns = (D.nieuws[t.ticker] || []).slice(0, 3);
   if (!ns.length) return '';
@@ -1138,7 +1163,7 @@ function openTrade(id){
         <div><span class="xs">Jij</span>${pctEl(t.rM)}<span class="xs">vanaf zichtbaar</span></div></div>
       <div class="chart" id="chartBox">${needsLoad(t) ? '<div class="empty">Koersgrafiek laden…</div>' : chartSvg(t)}</div>
       ${two ? `<div class="two">${two}</div>` : ''}
-      ${insiderBox(t)}${nieuwsBox(t)}${roundBox(t)}
+      ${insiderBox(t)}${opdrachtenBox(t)}${wetBox(t)}${nieuwsBox(t)}${roundBox(t)}
       ${t.link && /^https?:/.test(t.link) ? `<p class="small" style="margin:0"><a href="${esc(t.link)}" target="_blank" rel="noopener noreferrer">Originele melding bekijken</a></p>` : ''}
       <p class="xs muted" style="margin:0">Rendement = koers van het aandeel, niet het resultaat van de politicus · geen beleggingsadvies</p>
     </div>`;
@@ -1175,9 +1200,11 @@ function openUitleg(){
       <li><b>Insider koopt ook</b>: een bestuurder, commissaris of grootaandeelhouder van het bedrijf kocht binnen 30 dagen ook (alleen gewone aankopen, geen opties of toekenningen). <b>Eerste insider-aankoop in X jaar</b>: daarvoor kochten insiders lange tijd niet.</li>
       <li><b>Onder koers politicus</b>: het aandeel staat nu lager dan op het werkelijke moment, dus je kunt goedkoper instappen dan de politicus. Een koers kan ook om een goede reden gedaald zijn; kijk naar het nieuws.</li>
       <li><b>Koop vlak voor cijfers</b>: gekocht binnen 30 dagen vóór de kwartaalcijfers.</li>
+      <li><b>Wetgeving in commissie</b>: binnen 30 dagen vóór of na de aankoop deed een commissie van de politicus iets met een wetsvoorstel over de sector van het bedrijf (hoorzitting, behandeling of rapport; een enkele doorverwijzing telt niet). Grof signaal op basis van het beleidsterrein (bron: Congress.gov). In de backtest telt het alleen als de actie vóór het zichtbare moment plaatsvond.</li>
+      <li><b>Overheidsopdracht na koop</b>: het bedrijf kreeg binnen 90 dagen na de aankoop een Amerikaanse overheidsopdracht van minstens $10 miljoen én minstens 1% van zijn marktwaarde (bron: USAspending.gov, gekoppeld op bedrijfsnaam). In de backtest telt dit alleen als de opdracht al bekend was op het zichtbare moment.</li>
       <li><b>Cluster kopen</b>: andere politici kochten binnen 14 dagen hetzelfde aandeel (gemengd: niet allemaal kopen).</li>
       <li><b>Klein bedrijf</b>: marktwaarde onder $2 miljard. <b>Groot bedrag</b>: ondergrens van de bandbreedte vanaf $250.001. <b>Nieuwe positie</b>: de eerste aankoop van dit aandeel door deze politicus in de data. Hoe laat een trade gemeld is, zie je in het detailvenster bij het zichtbare moment.</li>
-      <li><b>Sterk</b>: commissie-match én (insider koopt ook of onder koers politicus).</li>
+      <li><b>Sterk</b>: commissie-match én (insider koopt ook, onder koers politicus of overheidsopdracht na koop).</li>
     </ul>
     <h3>Rondes</h3>
     <p>Per politicus, aandeel en eigenaar (zelf, partner, gezamenlijk) koppelen we elke verkoop aan de eerdere aankopen die nog openstonden. Een volledige verkoop of een verkoop met onbekende omvang sluit ze af; een deelverkoop niet. Bij meerdere aankopen gebruiken we de gemiddelde slotkoers.</p>

@@ -53,13 +53,108 @@ def log(*a):
 
 
 def safe(url):
-    return re.sub(r"apikey=[^&]+", "apikey=***", url)
+    return re.sub(r"(api_?key=)[^&]+", r"\1***", url)
 
 
 class HttpError(RuntimeError):
     def __init__(self, code, body, url):
         super().__init__(f"HTTP {code}: {body} ({safe(url)})")
         self.code, self.body = code, body
+
+
+def post_json(url, body, tries=4):
+    global CALLS
+    last = None
+    data = json.dumps(body).encode("utf-8")
+    for i in range(tries):
+        try:
+            CALLS += 1
+            req = urllib.request.Request(url, data=data, method="POST",
+                                         headers={"Content-Type": "application/json", "User-Agent": "kapitoolradar/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            last = HttpError(e.code, e.read().decode("utf-8", "replace")[:300], url)
+            if e.code in (429, 500, 502, 503, 504):
+                time.sleep(3 * (i + 1))
+                continue
+            raise last
+        except Exception as e:
+            last = RuntimeError(f"{e} ({url})")
+            time.sleep(3 * (i + 1))
+    raise last
+
+
+STOP = {"inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "llc", "lp", "holdings", "holding",
+        "group", "the", "class", "a", "b", "c", "common", "stock", "shares", "ordinary", "sa", "nv", "ag", "se", "de", "and", "com"}
+
+
+def name_tokens(name):
+    return [w for w in norm(name) if w not in STOP and len(w) > 1]
+
+
+def fetch_contracts(tickers, cache, first_buy):
+    """Grote Amerikaanse overheidsopdrachten per bedrijf (USAspending.gov, geen key nodig)."""
+    out, fails, logged, matched = {}, 0, False, 0
+    for i, tk in enumerate(tickers):
+        naam = (cache.get(tk) or {}).get("naam")
+        toks = name_tokens(naam or "")
+        if not toks:
+            continue
+        zoek = " ".join(toks[:3])
+        start = max(SINCE, (date.fromisoformat(first_buy.get(tk, SINCE)) - timedelta(days=30)).isoformat())
+        # new_awards_only: alleen opdrachten waarvan de eerste (basis)transactie in de periode valt, dus echt nieuwe opdrachten
+        body = {"filters": {"award_type_codes": ["A", "B", "C", "D"], "recipient_search_text": [zoek],
+                            "time_period": [{"start_date": start, "end_date": TODAY.isoformat(), "date_type": "new_awards_only"}],
+                            "award_amounts": [{"lower_bound": OPDRACHT_MIN / 10}]},
+                "fields": ["Award ID", "Recipient Name", "Award Amount", "Base Obligation Date", "Start Date", "Awarding Agency",
+                           "Awarding Sub Agency", "Description", "generated_internal_id"],
+                "page": 1, "limit": 50, "sort": "Award Amount", "order": "desc"}
+        try:
+            d = post_json(f"{USA}/search/spending_by_award/", body)
+        except Exception as e:
+            fails += 1
+            if fails == 1:
+                log("Overheidsopdrachten mislukt:", str(e)[:200])
+            if fails == 3 and matched == 0 and i < 10:
+                log("Overheidsopdrachten: module uitgeschakeld voor deze run.")
+                return {}
+            continue
+        rows = d.get("results") if isinstance(d, dict) else None
+        if rows and not logged:
+            log(f"overheidsopdrachten: velden in antwoord: {sorted(rows[0].keys())}")
+            logged = True
+        mw = (cache.get(tk) or {}).get("marktwaarde")
+        lst = []
+        for x in rows or []:
+            rec = " ".join(norm(x.get("Recipient Name") or ""))
+            if not all(tkn in rec.split() for tkn in toks[:2]):
+                continue  # andere ontvanger met een lijkende naam
+            bedrag = numv(x.get("Award Amount"))
+            dt = to_date(x.get("Base Obligation Date")) or to_date(x.get("Start Date"))
+            if not bedrag or not dt or bedrag < OPDRACHT_MIN / 10:
+                continue
+            gid = x.get("generated_internal_id")
+            lst.append({"datum": dt, "bedrag": round(bedrag), "instantie": x.get("Awarding Sub Agency") or x.get("Awarding Agency"),
+                        "omschrijving": (x.get("Description") or "")[:160], "ontvanger": x.get("Recipient Name"),
+                        "url": f"https://www.usaspending.gov/award/{gid}" if gid else None,
+                        "groot": bool(bedrag >= OPDRACHT_MIN and (not mw or bedrag >= mw * OPDRACHT_MIN_PCT / 100))})
+        if lst:
+            matched += 1
+            lst.sort(key=lambda o: o["datum"], reverse=True)
+            out[tk] = lst[:15]
+        time.sleep(0.3)
+        if (i + 1) % 200 == 0:
+            log(f"  overheidsopdrachten: {i + 1}/{len(tickers)}")
+    log(f"Overheidsopdrachten: gevonden voor {matched} van {len(tickers)} bedrijven ({fails} mislukt)")
+    return out
+
+
+def numv(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_json(url, tries=5):
@@ -148,6 +243,7 @@ def load_legislators():
         log("Waarschuwing: congress-legislators niet bereikbaar, partij/commissies ontbreken:", e)
         return []
     names = {c.get("thomas_id"): c.get("name") for c in coms if c.get("thomas_id")}
+    CODE_BY_NAME.update({v: k for k, v in names.items() if v})
     by_bio = {}
     for code, members in mem.items():
         if code not in names:  # subcommissies overslaan
@@ -277,6 +373,153 @@ ONLY_CURRENT = os.environ.get("ALLEEN_HUIDIGE_LEDEN", "1") != "0"  # zet op 0 om
 INSIDER_DAYS = int(os.environ.get("INSIDER_DAYS", str(LOOKBACK)))  # ook oudere trades, voor de signaal-backtest
 INSIDER_SINCE = (TODAY - timedelta(days=INSIDER_DAYS)).isoformat()
 NEWS_DAYS = int(os.environ.get("NEWS_DAYS", "90"))
+USA = os.environ.get("USASPENDING_BASE", "https://api.usaspending.gov/api/v2")
+OPDRACHT_MIN = float(os.environ.get("OPDRACHT_MIN", "1e7"))        # minimaal $10 miljoen
+OPDRACHT_MIN_PCT = float(os.environ.get("OPDRACHT_MIN_PCT", "1"))  # en minimaal 1% van de marktwaarde
+OPDRACHT_DAGEN = int(os.environ.get("OPDRACHT_DAGEN", "90"))       # opdracht binnen zoveel dagen na de koop
+CG = os.environ.get("CONGRESS_BASE", "https://api.congress.gov/v3")
+CG_KEY = os.environ.get("CONGRESS_API_KEY", "").strip()
+WET_DAGEN = int(os.environ.get("WET_DAGEN", "30"))          # commissie-actie binnen zoveel dagen voor of na de koop
+WET_MAX_PAGINAS = int(os.environ.get("WET_MAX_PAGINAS", "12"))
+WET_MAX_DETAILS = int(os.environ.get("WET_MAX_DETAILS", "1500"))
+CODE_BY_NAME = {}
+
+# Beleidsterrein van een wetsvoorstel (Congress.gov "policyArea") -> sectoren / branches
+POLICY_RULES = [
+    ("armed forces and national security", [], ["aerospace", "defense"]),
+    ("energy", ["Energie", "Nutsbedrijven"], []),
+    ("health", ["Gezondheidszorg"], []),
+    ("finance and financial sector", ["Financiën"], []),
+    ("science, technology, communications", ["Technologie", "Communicatie"], []),
+    ("transportation and public works", [], ["airline", "railroad", "trucking", "auto", "engineering & construction", "marine shipping"]),
+    ("agriculture and food", ["Consument (defensief)", "Grondstoffen"], ["agricultur", "farm", "food"]),
+    ("environmental protection", ["Energie", "Nutsbedrijven", "Grondstoffen"], []),
+    ("public lands and natural resources", ["Grondstoffen", "Energie"], []),
+    ("water resources development", ["Nutsbedrijven"], []),
+    ("housing and community development", ["Vastgoed"], []),
+]
+BILL_PATH = {"hr": "house-bill", "s": "senate-bill", "hjres": "house-joint-resolution", "sjres": "senate-joint-resolution",
+             "hres": "house-resolution", "sres": "senate-resolution", "hconres": "house-concurrent-resolution",
+             "sconres": "senate-concurrent-resolution"}
+
+
+def ordinal(n):
+    n = int(n)
+    return f"{n}{'th' if 10 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def policy_match(policy, sector, industrie):
+    pl, ind = (policy or "").lower(), (industrie or "").lower()
+    for key, sectors, inds in POLICY_RULES:
+        if key == pl and (sector in sectors or any(x in ind for x in inds)):
+            return True
+    return False
+
+
+def cg_get(path, **params):
+    params["api_key"] = CG_KEY
+    params["format"] = "json"
+    d = get_json(f"{CG}/{path}?{urllib.parse.urlencode(params)}")
+    time.sleep(0.75)  # max 5.000 verzoeken per uur
+    return d
+
+
+def find_list(d, word):
+    if isinstance(d, list):
+        return d
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if word in k.lower() and isinstance(v, list):
+                return v
+        for v in d.values():
+            r = find_list(v, word)
+            if r:
+                return r
+    return []
+
+
+def fetch_bills(trades, politici, prev_cache):
+    """Wetsvoorstellen met echte commissie-activiteit (geen enkele doorverwijzing) per commissie van handelende politici."""
+    if not CG_KEY:
+        log("Wetgeving: geen CONGRESS_API_KEY, module overgeslagen.")
+        return {}, prev_cache
+    names = set()
+    for t in trades:
+        if t["type"] == "koop":
+            names.update((politici.get(t["politicus_id"]) or {}).get("commissies") or [])
+    by_com, details, calls_d, fails = {}, dict(prev_cache), 0, 0
+    for name in sorted(names):
+        code = CODE_BY_NAME.get(name)
+        if not code or code[0] not in "HS":
+            continue
+        chamber = "house" if code[0] == "H" else "senate"
+        cg_code = code.lower() + "00"
+        rows = []
+        for page in range(WET_MAX_PAGINAS):
+            try:
+                d = cg_get(f"committee/{chamber}/{cg_code}/bills", limit=250, offset=page * 250)
+            except Exception as e:
+                fails += 1
+                if fails == 1:
+                    log("Wetgeving mislukt:", str(e)[:200].replace(CG_KEY, "***"))
+                if fails >= 3 and not by_com:
+                    log("Wetgeving: module uitgeschakeld voor deze run.")
+                    return {}, prev_cache
+                break
+            lst = find_list(d, "bill")
+            if page == 0 and lst and not by_com:
+                log(f"wetgeving: velden in antwoord: {sorted(lst[0].keys())}")
+            if not lst:
+                break
+            rows += lst
+            if len(lst) < 250:
+                break
+        acts = []
+        for b in rows:
+            rel = str(b.get("relationshipType") or "")
+            dt = to_date(b.get("actionDate"))
+            if not dt or dt < SINCE or rel.lower().startswith("referred") or not rel:
+                continue
+            key = f'{b.get("congress")}-{str(b.get("billType") or "").lower()}-{b.get("billNumber")}'
+            acts.append({"key": key, "actie": rel, "datum": dt})
+        by_com[name] = acts
+    # details (beleidsterrein en titel) per wetsvoorstel, met cache van vorige runs
+    need = sorted({a["key"] for acts in by_com.values() for a in acts if a["key"] not in details})
+    for key in need[:WET_MAX_DETAILS]:
+        congress, btype, num = key.split("-")
+        try:
+            d = cg_get(f"bill/{congress}/{btype}/{num}")
+            b = d.get("bill", {}) if isinstance(d, dict) else {}
+            details[key] = {"titel": (b.get("title") or "")[:200], "beleid": ((b.get("policyArea") or {}).get("name") or "")}
+            calls_d += 1
+        except Exception:
+            details[key] = {"titel": "", "beleid": ""}
+    n_acts = sum(len(a) for a in by_com.values())
+    log(f"Wetgeving: {n_acts} commissie-acties in {len(by_com)} commissies, {calls_d} nieuwe details ({len(need) - min(len(need), WET_MAX_DETAILS)} uitgesteld)")
+    return by_com, details
+
+
+def bill_url(key):
+    congress, btype, num = key.split("-")
+    path = BILL_PATH.get(btype)
+    return f"https://www.congress.gov/bill/{ordinal(congress)}-congress/{path}/{num}" if path else None
+
+
+def bill_label(key):
+    congress, btype, num = key.split("-")
+    lbl = {"hr": "H.R.", "s": "S.", "hjres": "H.J.Res.", "sjres": "S.J.Res.", "hres": "H.Res.", "sres": "S.Res.",
+           "hconres": "H.Con.Res.", "sconres": "S.Con.Res."}.get(btype, btype.upper())
+    return f"{lbl} {num}"
+
+
+def load_prev_json(name):
+    if not PREV_URL:
+        return {}
+    try:
+        d = get_json(f"{PREV_URL}/{name}?t={int(time.time())}", tries=2)
+        return d if isinstance(d, dict) and "Error Message" not in d else {}
+    except Exception:
+        return {}
 SMALL_CAP = float(os.environ.get("KLEIN_BEDRIJF_GRENS", "2e9"))  # marktwaarde in dollars
 INSIDER_WINDOW = int(os.environ.get("INSIDER_WINDOW", "30"))  # dagen rond de transactiedatum
 
@@ -613,6 +856,12 @@ def build():
     news_tickers = sorted({t["ticker"] for t in trades if t["type"] == "koop" and t.get("soort") != "ETF"
                            and (t["meldingsdatum"] or "") >= news_since})
     cijfers = fetch_module("kwartaalcijfers", buy_tickers, EARNINGS_VARIANTS, parse_earnings)
+    first_buy = {}
+    for t in trades:
+        if t["type"] == "koop" and t["ticker"] in buy_tickers:
+            first_buy[t["ticker"]] = min(first_buy.get(t["ticker"], "9999"), t["transactiedatum"])
+    opdrachten = fetch_contracts(buy_tickers, cache, first_buy)
+    bills_by_com, bill_details = fetch_bills(trades, politici, load_prev_json("wetten.json"))
     insiderstat = fetch_module("insiderstatistiek", buy_tickers, INSIDERSTAT_VARIANTS, parse_insiderstat)
     nieuws = fetch_module("nieuws", news_tickers, NEWS_VARIANTS, parse_news)
 
@@ -652,6 +901,26 @@ def build():
         if nxt:
             s.append("koop vlak voor cijfers")
             t["cijfers_na_koop"] = nxt[0]
+        opd = [o for o in opdrachten.get(t["ticker"], []) if o.get("groot") and o["datum"]
+               and t["transactiedatum"] < o["datum"] <= (txd + timedelta(days=OPDRACHT_DAGEN)).isoformat()]
+        if opd:
+            o = min(opd, key=lambda x: x["datum"])
+            s.append("overheidsopdracht na koop")
+            t["opdracht_na_koop"] = {"datum": o["datum"], "bedrag": o["bedrag"], "instantie": o.get("instantie")}
+        if t.get("soort") != "ETF" and bills_by_com:
+            ind = cache.get(t["ticker"], {}).get("industrie", "")
+            best = None
+            for com in (p.get("commissies") or []):
+                for a in bills_by_com.get(com, []):
+                    if abs((date.fromisoformat(a["datum"]) - txd).days) > WET_DAGEN:
+                        continue
+                    det = bill_details.get(a["key"]) or {}
+                    if policy_match(det.get("beleid"), t["sector"], ind) and (best is None or a["datum"] < best["datum"]):
+                        best = {"datum": a["datum"], "actie": a["actie"], "commissie": com, "nummer": bill_label(a["key"]),
+                                "titel": det.get("titel"), "beleid": det.get("beleid"), "url": bill_url(a["key"])}
+            if best:
+                s.append("wetgeving in commissie")
+                t["wet_in_commissie"] = best
         mw = cache.get(t["ticker"], {}).get("marktwaarde")
         if t.get("soort") == "Aandeel" and mw and mw < SMALL_CAP:
             s.append("klein bedrijf")
@@ -666,6 +935,7 @@ def build():
         "koershistorie_map": "koersen/",
         "insiders": {tk: v[:15] for tk, v in insiders.items() if v},
         "cijfers": cijfers,
+        "opdrachten": opdrachten,
         "insiderstat": insiderstat,
         "nieuws": nieuws,
         "eurusd": {"koers": eurusd, "datum": TODAY.isoformat()} if eurusd else None,
@@ -675,6 +945,8 @@ def build():
     }
     with open(os.path.join(OUT_DIR, "data.json"), "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+    with open(os.path.join(OUT_DIR, "wetten.json"), "w", encoding="utf-8") as f:
+        json.dump(bill_details, f, ensure_ascii=False, separators=(",", ":"))
     with open(os.path.join(OUT_DIR, "profielen.json"), "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, separators=(",", ":"))
     if os.path.exists("index.html"):
