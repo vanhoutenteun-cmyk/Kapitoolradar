@@ -30,7 +30,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240   # met wetgeving en een lege cache duurt een run langer dan 90 min
     steps:
       - uses: actions/checkout@v5
 
@@ -55,11 +55,15 @@ jobs:
         run: python build_data.py
 
       - name: Cache klaarzetten
+        if: always()
         run: |
           mkdir -p cache
-          cp site/profielen.json site/wetten.json cache/
+          for f in profielen.json wetten.json; do
+            if [ -f "site/$f" ]; then cp "site/$f" cache/; fi
+          done
 
       - name: Cache bewaren
+        if: always() && hashFiles('cache/*.json') != ''
         uses: actions/cache/save@v4
         with:
           path: cache
